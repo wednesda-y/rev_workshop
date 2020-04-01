@@ -1,0 +1,3 @@
+What's the output of this function when the argument is 1337? 
+The flag is of the form MISCCTF{answer (in decimcal)},
+so if you think the answer is 102, the flag is MISCCTF{102}

@@ -1,0 +1,3 @@
+This one has lots of jumps! What is the output of this function, when the arguments are 0xde and 0xad?
+The flag is of the form MISCCTF{answer (in decimcal)},
+so if you think the answer is 102, the flag is MISCCTF{102}

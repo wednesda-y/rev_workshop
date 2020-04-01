@@ -1,0 +1,380 @@
+\documentclass{beamer}
+\usetheme{Madrid}
+\usepackage{tikz-cd}
+\usepackage{listings}
+\lstset{basicstyle=\footnotesize\ttfamily,breaklines=true}
+\begin{document}
+\title{Introduction to x86 Reverse Engineering}
+\author{Melbourne Information Security Club}
+\date{March 16, 2020}
+\frame{\titlepage}
+\begin{frame}[fragile]
+  \frametitle{What is Reverse Engineering?}
+  If we consider the ordinary process of \textit{engineering} in the
+  context of software.
+  \[
+  \begin{tikzcd}
+    \text{Conceptual Idea or Design} \arrow[d, "\text{Development}"]              \\
+    {\text{High Level Code, (Python, Java, C etc.)}} \arrow[d, "\text{Compiler}"] \\
+    \text{Machine Code / Assembly}
+  \end{tikzcd}
+  \]
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{What is Reverse Engineering?}
+  Reverse Engineering is the opposite process.
+  \[
+  \begin{tikzcd}
+    \text{Conceptual Idea or Design}                           \\
+    \text{Machine Code/ Assembly} \arrow[u]
+  \end{tikzcd}
+  \]
+  \begin{itemize}
+    \item That is, the end goal is to work backwards from a
+    non human-friendly form of a program, in order to gain a conceptual understanding of what the
+    program is doing.
+    \item This workshop will teach you how to read (32-bit) x86 assembly in order
+    to reverse engineer what a given program is doing.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{How to disassemble Linux ELF Binaries}
+  We first need to understand how to execute ELF binaries.
+  \begin{example}
+    Given an ELF Binary,
+    \begin{lstlisting}[basicstyle=\small\ttfamily]
+    $ file behemoth0
+    behemoth0: setuid ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV),
+    \end{lstlisting}
+    We first make sure it is executable
+    \begin{lstlisting}[basicstyle=\small\ttfamily]
+    $ chmod +x behemoth0
+    $ ls -l behemoth0
+    -r-sr-x--x 1 darrenx darrenx 5900 Aug  8  2019 behemoth0
+    \end{lstlisting}
+    and then we can run it using \texttt{./}
+    \begin{lstlisting}[basicstyle=\small\ttfamily]
+    $ ./behemoth0
+
+    \end{lstlisting}
+  \end{example}
+\end{frame}
+\begin{frame}
+  \frametitle{How to disassemble Linux ELF Binaries}
+  Now that we know how to execute binaries, we will now use a debugger to
+  look at the underlying assembly that we will need to reverse engineer.
+  \begin{block}{Using \texttt{gdb} to disassemble a binary}
+    Basic \texttt{gdb} commands summary sheet:
+    \begin{itemize}
+      \item View functions: \texttt{(gdb) info functions}
+      \item Change disassembly from AT\&T syntax to Intel:
+      \texttt{(gdb) set disasembly-flavor intel}
+      \item Disassemble function (e.g main): \texttt{(gdb) disass main}
+    \end{itemize}
+  \end{block}
+  \begin{exampleblock}{Demo}
+    Use \texttt{gdb} to disassemble the main function of a \texttt{hello\_world}
+    program.
+  \end{exampleblock}
+\end{frame}
+
+\begin{frame}
+  \frametitle{Introduction to x86 Assembly}
+  There are two fundamental concepts which you'll need to know.
+  \begin{definition}
+    A \textbf{register} is a quickly accessible storage location, located
+    directly on the processor itself. We can think of them as
+    essentially \textit{untyped variables}
+  \end{definition}
+  \begin{itemize}
+    \item The 32-bit general purpose registers we generally deal with are given the names
+    EAX, EBX, ECX, EDX, ESI, EDI, ESP, EBP.
+    \item The EIP register points to the next instruction to be executed.
+    \item The ESP and EBP registers point to the top of the stack and the bottom
+    of the current stack frame respectively.
+    \item Although it is technically possible for a general purpose register to hold any 32-bit piece
+    of data, registers are typically associated with a special purpose.
+  \end{itemize}
+  \begin{example}
+    For example,EAX typically stores the result of arithmetic operations.
+  \end{example}
+\end{frame}
+
+\begin{frame}
+  \frametitle{Introduction to x86 Assembly}
+  \begin{definition}
+    \textbf{Instructions} are the basic statements that tell the processor what to do.
+  \end{definition}
+  \begin{examples}
+    \begin{itemize}
+      \item \texttt{mov eax, ecx} moves (or more accurately copies) data from
+      the ECX register to the EAX register.
+      \item \texttt{push eax} or \texttt{pop eax} places the value of EAX onto
+      the stack, or removes the value at the top of the stack and places it into EAX
+      respectively.
+
+      \item \texttt{add eax, ebx} adds the values of the EAX and EBX registers,
+      and stores the result in the EAX register. Other arithmetic operations are
+      available, and in Intel syntax, the result is stored in the left operand.
+    \end{itemize}
+  \end{examples}
+\end{frame}
+
+\begin{frame}
+  \frametitle{Recognising Code Patterns}
+  So technically, we now possess the requisite knowledge to reverse engineer
+  binaries. Given any disassembled function we simply need to
+  \begin{itemize}
+    \item Read through every single
+    instruction one at a time,
+    \item figure out what effect the instruction has on each register,
+    \item and we can just look up any instructions we don't know in the (2000 page long) Intel x86 Software Developer's Manual.
+    \item .... right??
+  \end{itemize}
+
+  \begin{alertblock}{Main takeaway from this workshop}
+    Trying to reverse engineer a program by reading through and interpreting
+    every single instruction is ridiculous. What is more important to gaining
+    a conceptual understanding of the program is to \textbf{recognise code patterns}.
+  \end{alertblock}
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{The Simplest Example}
+  The simplest program we can do is an empty function.
+  \begin{block}{C code}
+  \begin{lstlisting}[language=C, basicstyle=\small\ttfamily]
+  void func(){
+    ;
+  }
+  \end{lstlisting}
+\end{block}
+When we look at the compiled binary in a disassembler, we get
+\begin{block}{Assembly}
+  \begin{lstlisting}[basicstyle=\small\ttfamily, language={[x86masm]Assembler}]
+(fcn) sym.func 2
+  0x000004f0      f3c3           ret
+\end{lstlisting}
+\end{block}
+When a function is called, the return address is pushed onto the stack.
+At the end of a function, the \texttt{ret} instruction causes the program to jump
+to the address located at top of the stack.
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{Returning values}
+  Lets try returning some values now.
+  \begin{block}{C Code}
+  \begin{lstlisting}[language=C, basicstyle=\small\ttfamily]
+  int func(){
+    return 1337;
+  }
+  \end{lstlisting}
+\end{block}
+
+\begin{block}{Assembly}
+\begin{lstlisting}[basicstyle=\ttfamily]
+(fcn) sym.func 6
+  0x000004ed      b839050000     mov eax, 0x539
+  0x000004f2      c3             ret
+\end{lstlisting}
+Note: 0x539 = 1337
+\end{block}
+From this, we can deduce that the general convention is to store
+function return values in the EAX register.
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{The Stack}
+  \begin{itemize}
+    \item The stack is a region of memory used by the program to store local variables,
+    function arguments, and any other data not immediately required.
+    \item By convention, the bottom of the stack begins at 0xffffff, and grows
+    \alert{backwards} towards lower addresses.
+    \item Recall that the ESP register points to the top of the stack, and the
+    EBP register points to the bottom of the current stack frame. Hence the function's stack
+    frame lies between these two pointers.
+    \[
+    \begin{tikzcd}
+      \text{ESP} \arrow[r, no head, maps to] & \text{Function Stack Frame} & \text{EBP} \arrow[l, no head, maps to]
+    \end{tikzcd}
+    \]
+    \item Establishing the stack frame (i.e moving ESP and EBP to their correct values)
+    is achieved in the \textit{function prologue} and the \textit{function epilogue}.
+  \end{itemize}
+\end{frame}
+\begin{frame}[fragile]
+  \frametitle{Function prologue and epilogue}
+  Let's try a function with a local variable.
+  \begin{block}{C Code}
+  \begin{lstlisting}[language=C, basicstyle=\small]
+  void func(){
+    int a = 0;
+  }
+  \end{lstlisting}
+\end{block}
+\end{frame}
+\begin{frame}[fragile]
+\begin{block}{Assembly}
+\begin{lstlisting}[basicstyle=\small\ttfamily]
+(fcn) sym.func 15
+  /* Establish func()'s stack frame */
+  0x000004ed      55            push ebp
+  0x000004ee      89e5          mov ebp, esp
+  0x000004f0      83ec10        sub esp, 0x10
+  /* Assign 0 to the local variable 'a' stored on the stack */
+  0x000004fd      c745fc000000. mov dword [ebp-0x4], 0
+  0x00000504      90            nop
+  /* Clean up func()'s stack frame */
+  0x00000505      c9            leave
+  0x00000506      c3            ret
+\end{lstlisting}
+\end{block}
+Note that \texttt{leave} is a short hand for \texttt{mov esp, ebp; pop ebp}.
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{Passing function arguments}
+  Let's try a function that takes in arguments, firstly from the callers' side
+  \begin{block}{C Code}
+  \begin{lstlisting}[language=C, basicstyle=\small\ttfamily]
+  int main(){
+    return func(1,2);
+  }
+  \end{lstlisting}
+\end{block}
+\end{frame}
+\begin{frame}[fragile]
+\begin{block}{Assembly}
+\begin{lstlisting}[basicstyle=\small\ttfamily]
+(fcn) main 17
+  0x00000504      55             push ebp
+  0x00000505      89e5           mov ebp, esp
+  /* Push function arguments onto stack in reverse order */
+  0x00000507      6a02           push 2
+  0x00000509      6a01           push 1
+  0x0000050e      e8d3ffffff     call sym.func
+  /* Clean up the stack space used by the arguments from before */
+  0x00000511      83c408         add esp, 8
+  0x00000512      c9             leave
+  0x00000513      c3             ret
+\end{lstlisting}
+\end{block}
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{Passing function arguments}
+  Now let's see what happens from the function's perspective.
+  \begin{block}{C Code}
+  \begin{lstlisting}[language=C]
+  int func(int a, int b){
+    return a + b;
+  }
+  \end{lstlisting}
+\end{block}
+\end{frame}
+
+\begin{frame}[fragile]
+\begin{block}{Assembly}
+\begin{lstlisting}[basicstyle=\small\ttfamily]
+(fcn) sym.func 23
+  0x000004ed      55          push ebp
+  0x000004ee      89e5        mov ebp, esp
+  /* Function arguments are accessed from the stack, relative to func()'s stack frame. */
+  0x000004fa      8b5508      mov edx, dword [ebp+0x8]
+  0x000004fd      8b450c      mov eax, dword [ebp+0xc]
+  0x00000500      01d0        add eax, edx
+  0x00000502      5d          pop ebp
+  0x00000503      c3          ret
+\end{lstlisting}
+\end{block}
+\end{frame}
+
+\begin{frame}[fragile]
+  \frametitle{Control Flow: Selection}
+  The last two basic code patterns deal with control flow.
+  \begin{block}{C Code}
+  \begin{lstlisting}[basicstyle=\small\ttfamily,language=C]
+  int func(int a){
+    if(a > 3)
+      return 1;
+    else
+      return 0;
+  }
+  \end{lstlisting}
+\end{block}
+\end{frame}
+
+\begin{frame}[fragile]
+\begin{block}{Assembly}
+\begin{lstlisting}[basicstyle=\small\ttfamily]
+(fcn) sym.func 33
+     0x000004ed     55          push ebp
+     0x000004ee     89e5        mov ebp, esp
+     0x000004fa     837d0803    cmp dword [ebp+0x8], 3
+ ,=< 0x000004fe     7e07        jle 0x507
+ |   0x00000500     b801000000  mov eax, 1
+,==< 0x00000505     eb05        jmp 0x50c
+||   ; CODE XREF from sym.func (0x4fe)
+|`-> 0x00000507     b800000000  mov eax, 0
+|    ; CODE XREF from sym.func (0x505)
+`--> 0x0000050c     5d          pop ebp
+     0x0000050d     c3          ret
+\end{lstlisting}
+\end{block}
+\end{frame}
+
+\begin{frame}
+  \frametitle{Control Flow Graphs}
+  \begin{itemize}
+    \item While it was very nice of \texttt{radare2} to include arrows in the
+  disassembly of the previous slide to indicate jumps,
+  in more complex functions those arrows get cluttered easily.
+  \item For this reason, most reverse engineering platforms will possess the capacity to produce CFGs.
+  \end{itemize}
+  \begin{exampleblock}{Demo}
+    Use \texttt{radare2} to view a CFG of the function on the previous slide.
+  \end{exampleblock}
+\end{frame}
+
+\begin{frame}[fragile]
+    \frametitle{Control Flow: Repetition}
+    The last code pattern we will explore is actually best represented in a CFG.
+    \begin{block}{C Code}
+      \begin{lstlisting}[language=C]
+int func(int a){
+    for(int i = 0; i < a; i++)
+        a += i;
+    return a;
+}
+    \end{lstlisting}
+    \end{block}
+    \begin{exampleblock}{Demo}
+    Use \texttt{radare2} to view the CFG representation of a for loop.
+    Identify the loop initialisation statement, the loop index variable, the guard condition, and the increment statement.
+    \end{exampleblock}
+\end{frame}
+
+\begin{frame}
+\frametitle{Where to from here?}
+\begin{itemize}
+  \item We have covered the fundamental code patterns that make up programs, and explored
+  how they appear in assembly.
+
+  \item Build up your knowledge of code patterns
+  by writing your own code, and examining the corresponding disassembly like we have done today.
+
+  \item What we have covered today forms the basis of \textbf{static analysis}.
+  There is also \textbf{dynamic analysis} where one reverse engineers a program by
+  executing it in a debugging environment and tracing the flow of data as the program is running.
+
+  \item There are also many other architectures to explore beyond 32-bit x86.
+
+  \item Practice by doing lots of CTF challenges! We have curated some for this workshop which you
+      can play at \texttt{URL}.
+  \item Practice by doing lots of CTF challenges!
+\end{itemize}
+\end{frame}
+\end{document}
